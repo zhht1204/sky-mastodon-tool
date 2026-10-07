@@ -115,11 +115,40 @@ module WeiboImport
       end
     end
 
+    # 首帖按 budget 拆分、其余按 max_chars 拆分；相邻段合并回 max_chars 以减少碎片。
+    # 返回 [首段hash, 其余段数组]；空文本时首段为空串（由调用方追加 suffix）。
+    def split_first_with_budget(text, budget, max_chars:, url_weight:)
+      segs = split_text(text, max_chars: budget, url_weight: url_weight)
+      first = segs.empty? ? { 'text' => '', 'overlong' => false } : segs.shift
+      merged = []
+      segs.each do |seg|
+        if merged.any? && !seg['overlong'] && !merged.last['overlong'] &&
+           weighted_length(merged.last['text'] + seg['text'], url_weight: url_weight) <= max_chars
+          merged.last['text'] << seg['text']
+        else
+          merged << { 'text' => seg['text'].dup, 'overlong' => seg['overlong'] }
+        end
+      end
+      [first, merged]
+    end
+
     # 完整分段：输入规范化记录，输出段数组（有序，父段在前）
     # 每段: { segment_no:, text:, media:, created_at:, parent_segment_no: }
-    def segments(record, max_chars: DEFAULT_MAX_CHARS, url_weight: URL_WEIGHT, media_per_post: MEDIA_PER_POST)
+    # first_post_suffix: 追加在首帖末尾的固定文本（如原文链接行），
+    #   计入首帖长度预算（编号、链接计入长度红线）；为空则不追加。
+    def segments(record, max_chars: DEFAULT_MAX_CHARS, url_weight: URL_WEIGHT, media_per_post: MEDIA_PER_POST, first_post_suffix: nil)
       text = record['text'].to_s
-      text_segments = split_text(text, max_chars: max_chars, url_weight: url_weight)
+      suffix = first_post_suffix.to_s
+      if suffix.empty?
+        text_segments = split_text(text, max_chars: max_chars, url_weight: url_weight)
+      else
+        budget = max_chars - weighted_length(suffix, url_weight: url_weight)
+        raise ArgumentError, "first_post_suffix 过长，首帖剩余预算不足 (#{budget})" if budget < 50
+
+        head, rest = split_first_with_budget(text, budget, max_chars: max_chars, url_weight: url_weight)
+        head['text'] = "#{head['text']}#{suffix}"
+        text_segments = [head] + rest
+      end
 
       units = media_units(Array(record['media']), media_per_post)
 

@@ -86,7 +86,10 @@ module WeiboImport
         end
         o.on('--limit N', Integer, '只处理前 N 条来源微博（非拆分后帖子数）') { |v| @options[:limit] = v }
         o.on('--batch ID', '批次 ID（账本/报告标识）') { |v| @options[:batch] = v }
-        o.on('--resume', '从账本断点续跑（批次 B）') { @options[:resume] = true }
+        o.on('--resume', '从账本断点续跑（批次已有账本行时必须显式指定）') { @options[:resume] = true }
+        o.on('--language LANG', "帖子语言标记，默认 #{'zh'}（微博内容固定 zh）") { |v| @options[:language] = v }
+        o.on('--media-dir DIR', '媒体文件目录（默认 <input 所在目录>/media；须与 fetch-media 输出一致）') { |v| @options[:media_dir] = v }
+        o.on('--map-out PATH', '微博 ID → Mastodon 帖子映射输出（JSONL，默认 import-map-<batch>.jsonl）') { |v| @options[:map_out] = v }
         o.on('--[no-]dry-run', '只预演不写入（默认开启）') { |v| @options[:dry_run] = v }
         o.on('--report-file PATH', '预演报告输出文件（markdown）') { |v| @options[:report_file] = v }
         o.on('--execute', '真实执行（危险；仅批次 B 起对写命令生效）') { @options[:execute] = true }
