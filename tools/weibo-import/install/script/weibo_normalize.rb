@@ -206,10 +206,16 @@ module WeiboNormalizeCLI
     opts = {
       input: nil, media_dir: 'media', max_bytes: WeiboImport::Downloader::DEFAULT_MAX_BYTES,
       timeout: WeiboImport::Downloader::DEFAULT_TIMEOUT_SECONDS, retries: WeiboImport::Downloader::DEFAULT_RETRIES,
-      missing_out: 'missing-media.jsonl', results_out: 'media-results.jsonl'
+      missing_out: 'missing-media.jsonl', results_out: 'media-results.jsonl', headers: {}
     }
     OptionParser.new do |o|
       o.banner = '用法: weibo_normalize.rb fetch-media --input normalized.jsonl --media-dir media/ [options]'
+      o.on('--header \'NAME: VALUE\'', '附加请求头（可重复，如防盗链需要的 User-Agent/Referer）') do |v|
+        k, val = v.split(':', 2).map(&:strip)
+        raise ArgumentError, "--header 格式应为 'Name: Value': #{v.inspect}" if val.nil? || val.empty?
+
+        opts[:headers][k] = val
+      end
       o.on('--input PATH', 'normalized.jsonl（必填）') { |v| opts[:input] = v }
       o.on('--media-dir DIR', "媒体目录（默认 #{opts[:media_dir]}）") { |v| opts[:media_dir] = v }
       o.on('--max-bytes N', Integer, "单文件大小上限（默认 #{opts[:max_bytes]}）") { |v| opts[:max_bytes] = v }
@@ -257,7 +263,7 @@ module WeiboNormalizeCLI
 
         begin
           target = WeiboImport::Downloader.safe_target_path(opts[:media_dir], WeiboImport::Downloader.filename_from_uri(URI.parse(url)))
-          result = WeiboImport::Downloader.fetch(url, target, max_bytes: opts[:max_bytes], timeout: opts[:timeout], retries: opts[:retries])
+          result = WeiboImport::Downloader.fetch(url, target, max_bytes: opts[:max_bytes], timeout: opts[:timeout], retries: opts[:retries], headers: opts[:headers])
           stats[:ok] += 1
           stats[:extension_mismatch] += 1 if result['extension_mismatch']
           warn "警告: 扩展名与内容不符 #{target}（sniffed=#{result['sniffed_mime']}）" if result['extension_mismatch']

@@ -205,12 +205,12 @@ module WeiboImport
 
     # ---- 下载（批次 A 只在演练中验证拒绝路径，不做真实联网测试）-------------------
 
-    def fetch(url, out_path, max_bytes: DEFAULT_MAX_BYTES, timeout: DEFAULT_TIMEOUT_SECONDS, retries: DEFAULT_RETRIES, resolver: method(:system_resolve))
+    def fetch(url, out_path, max_bytes: DEFAULT_MAX_BYTES, timeout: DEFAULT_TIMEOUT_SECONDS, retries: DEFAULT_RETRIES, resolver: method(:system_resolve), headers: {})
       uri = validate_url(url, resolver: resolver)
       attempts = 0
       begin
         attempts += 1
-        fetch_once(uri, out_path, max_bytes: max_bytes, timeout: timeout, resolver: resolver)
+        fetch_once(uri, out_path, max_bytes: max_bytes, timeout: timeout, resolver: resolver, headers: headers)
       rescue DownloadError, Rejected => e
         raise if e.is_a?(Rejected)
         retry if attempts <= retries
@@ -218,7 +218,7 @@ module WeiboImport
       end
     end
 
-    def fetch_once(uri, out_path, max_bytes:, timeout:, resolver:)
+    def fetch_once(uri, out_path, max_bytes:, timeout:, resolver:, headers: {})
       redirects = 0
       current = uri
       loop do
@@ -231,19 +231,23 @@ module WeiboImport
         # 注：先解析校验再用域名建连存在理论上的 TOCTOU（DNS rebinding）窗口；
         # 单人工具抓取自备归档的场景下可接受，批次 B 若引入不可信源需改为直连已校验 IP + SNI。
 
-        response = http.request(Net::HTTP::Get.new(current.request_uri.empty? ? '/' : current.request_uri))
+        request = Net::HTTP::Get.new(current.request_uri.empty? ? '/' : current.request_uri)
+        headers.each { |k, v| request[k] = v }
+        # 必须用块式请求：无块形式的 response body 已整体读入，
+        # 之后 write_body 再调 read_body 会抛 "read_body called twice"
+        http.request(request) do |res|
+          case res
+          when Net::HTTPRedirection
+            redirects += 1
+            raise DownloadError, "重定向次数超过 #{MAX_REDIRECTS}" if redirects > MAX_REDIRECTS
 
-        case response
-        when Net::HTTPRedirection
-          redirects += 1
-          raise DownloadError, "重定向次数超过 #{MAX_REDIRECTS}" if redirects > MAX_REDIRECTS
-
-          current = redirect_target(current, response['location'])
-          raise Rejected, "重定向目标主机被拒绝: #{current.host}" unless host_allowed?(current.host, resolver: resolver)
-        when Net::HTTPSuccess
-          return write_body(response, out_path, max_bytes: max_bytes, url: current.to_s)
-        else
-          raise DownloadError, "HTTP #{response.code} #{response.message}"
+            current = redirect_target(current, res['location'])
+            raise Rejected, "重定向目标主机被拒绝: #{current.host}" unless host_allowed?(current.host, resolver: resolver)
+          when Net::HTTPSuccess
+            return write_body(res, out_path, max_bytes: max_bytes, url: current.to_s)
+          else
+            raise DownloadError, "HTTP #{res.code} #{res.message}"
+          end
         end
       end
     end

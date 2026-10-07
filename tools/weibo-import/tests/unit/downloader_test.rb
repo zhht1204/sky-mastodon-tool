@@ -1,11 +1,62 @@
 # frozen_string_literal: true
 
 require 'weibo_import/downloader'
+require 'tmpdir'
 
 class DownloaderTest < Minitest::Test
   D = WeiboImport::Downloader
 
   PUBLIC_RESOLVER = ->(_host) { ['93.184.216.34'] }  # 示例保留公网 IP
+
+  # ---- fetch_once 流式下载（stub Net::HTTP，回归 read_body called twice）----
+
+  class FakeHTTPOK < Net::HTTPSuccess
+    def initialize(chunks)
+      super('1.1', '200', 'OK')
+      @chunks = chunks
+    end
+
+    def read_body(&blk)
+      # 模拟块式语义：body 未预读，只能流式消费一次
+      @chunks.each(&blk)
+      @chunks = nil
+    end
+  end
+
+  class FakeHTTP
+    attr_reader :last_request, :response
+
+    attr_writer :response
+
+    attr_writer :use_ssl, :open_timeout, :read_timeout
+
+    def request(req, &blk)
+      @last_request = req
+      if blk
+        blk.call(@response)
+      else
+        @response
+      end
+    end
+  end
+
+  def test_fetch_once_streams_body_and_applies_headers
+    fake = FakeHTTP.new
+    fake.response = FakeHTTPOK.new(['ab', 'cd'])
+    Net::HTTP.stub(:new, ->(_host, _port) { fake }) do
+      Dir.mktmpdir do |dir|
+        out = File.join(dir, 'x.jpg')
+        result = D.fetch_once(URI('https://img.example.synthetic/a.jpg'), out,
+                              max_bytes: 1024, timeout: 5, resolver: PUBLIC_RESOLVER,
+                              headers: { 'User-Agent' => 'test-agent', 'Referer' => 'https://weibo.example/' })
+        assert_equal 'abcd', File.read(out)
+        assert_equal 4, result['bytes']
+        assert_match(/\A[0-9a-f]{64}\z/, result['sha256'])
+        assert_equal 'test-agent', fake.last_request['User-Agent']
+        assert_equal 'https://weibo.example/', fake.last_request['Referer']
+      end
+    end
+  end
 
   # ---- 私网/保留地址拒绝 ----
 
