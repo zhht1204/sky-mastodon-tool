@@ -69,7 +69,7 @@ rake test   # 跑通 139 个单元测试确认环境可用
 
 ### 1）开发机：解析与预演（不需要实例）
 
-以下示例以 **clone 方式** 的仓库路径书写；Release 产物用户按上文替换为解压目录路径。
+输入 JSON 按 [Weibo-archiver](https://github.com/Chilfish/Weibo-archiver) 的导出格式适配，微博导出步骤参考该仓库。以下示例以 **clone 方式** 的仓库路径书写；Release 产物用户按上文替换为解压目录路径。
 
 ```powershell
 git clone <本仓库>
