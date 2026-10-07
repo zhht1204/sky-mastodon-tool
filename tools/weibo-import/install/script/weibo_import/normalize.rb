@@ -125,7 +125,25 @@ module WeiboImport
 
     # ---- 单条规范化 ---------------------------------------------------------------
 
-    def normalize_record(record, map, index: nil, original_line: nil, default_offset: nil, now: nil)
+    # 呈现策略（--interactions / --retweet-media / --card），normalize 时固化进记录
+    DEFAULT_POLICY = { 'interactions' => 'summary', 'retweet_media' => 'include', 'card' => 'ignore' }.freeze
+    INTERACTIONS_MODES = %w[summary metadata counts].freeze
+    RETWEET_MEDIA_MODES = %w[include skip].freeze
+    CARD_MODES = %w[ignore append].freeze
+
+    def self.validate_policy!(policy)
+      policy = DEFAULT_POLICY.merge(policy || {})
+      {
+        'interactions' => INTERACTIONS_MODES,
+        'retweet_media' => RETWEET_MEDIA_MODES,
+        'card' => CARD_MODES
+      }.each do |key, allowed|
+        raise ArgumentError, "未知 #{key} 策略: #{policy[key].inspect}（允许 #{allowed.join('/')}）" unless allowed.include?(policy[key].to_s)
+      end
+      policy
+    end
+
+    def normalize_record(record, map, index: nil, original_line: nil, default_offset: nil, now: nil, policy: DEFAULT_POLICY)
       default_offset ||= resolve_tz(map.timezone)
       ex = map.extract(record)
       raise RecordError, "缺少 ID 字段 #{map.id_field.inspect}" if ex.source_id.nil? || ex.source_id.empty?
@@ -138,10 +156,16 @@ module WeiboImport
 
       text = ex.text_html ? html_to_text(ex.text_raw) : ex.text_raw.to_s
       text = text.gsub(/\r\n/, "\n")
+      # 零宽字符是来源平台的修饰噪声（如微博尾部 U+200B 签名标记），不属于正文内容
+      text = text.delete("\u200b\uFEFF")
+      text = apply_policy_to_text(text, ex, policy)
 
       visibility = resolve_visibility(ex.visibility_raw, map)
       reply_to = ex.reply_to_raw.nil? ? nil : ex.reply_to_raw.to_s
-      repost = repost_flag?(ex.repost_raw, map) ? truncate_graphemes(ex.repost_quote_raw.to_s.strip, 200) : nil
+      quote = ex.repost_quote_raw.to_s.strip
+      quote = truncate_graphemes(quote, map.repost_quote_max) if map.repost_quote_max.positive?
+      repost = repost_flag?(ex.repost_raw, map) ? quote : nil
+      media = apply_policy_to_media(ex, map, policy)
       raw_bytes = original_line || canonical_json(record)
 
       {
@@ -151,16 +175,53 @@ module WeiboImport
         'created_at' => time.iso8601,
         'text' => text,
         'visibility' => visibility,
-        'media' => ex.media_items || [],
+        'media' => media,
         'reply_to_source_id' => reply_to,
         'repost' => repost,
         'raw_record_sha256' => Digest::SHA256.hexdigest(raw_bytes),
         'extra' => {
           'source_created_at_raw' => ex.created_at_raw.to_s,
           'source_tz' => zone_used,
-          'created_at_utc' => time.utc.iso8601
+          'created_at_utc' => time.utc.iso8601,
+          'policy' => policy.dup,
+          'source_extra' => source_extra(ex, policy)
         }
       }
+    end
+
+    # 呈现策略 → 正文：card=append 追加卡片；interactions=summary 追加计数行（任一计数>0 才加）
+    def apply_policy_to_text(text, ex, policy)
+      out = text
+      if policy['card'] == 'append' && (ex.card_title || ex.card_link)
+        card_line = [ex.card_title, ex.card_link].compact.join(' ')
+        out = out.empty? ? card_line : "#{out}\n\n#{card_line}"
+      end
+      if policy['interactions'] == 'summary'
+        ic = ex.interactions || {}
+        r = ic['reposts'].to_i
+        c = ic['comments_count'].to_i
+        l = ic['likes'].to_i
+        if r.positive? || c.positive? || l.positive?
+          line = "原微博：#{r} 转发 · #{c} 评论 · #{l} 赞"
+          out = out.empty? ? line : "#{out}\n\n#{line}"
+        end
+      end
+      out
+    end
+
+    # 呈现策略 → 媒体：retweet_media=include 且为转发时，把转发原文图片按原顺序并到主列表之后
+    def apply_policy_to_media(ex, map, policy)
+      media = ex.media_items || []
+      return media unless policy['retweet_media'] == 'include' && repost_flag?(ex.repost_raw, map)
+
+      media + (ex.retweet_media_items || [])
+    end
+
+    # 元数据：计数始终保留；评论在 summary/metadata 模式保留（counts 模式丢弃）
+    def source_extra(ex, policy)
+      extra = { 'interactions' => ex.interactions }
+      extra['comments'] = ex.comments_raw if ex.comments_raw && policy['interactions'] != 'counts'
+      extra
     end
 
     def time_zone_of(raw, default_offset)
@@ -182,10 +243,7 @@ module WeiboImport
     end
 
     def repost_flag?(raw, map)
-      return false if raw.nil?
-
-      truthy = map.repost_truthy
-      truthy.include?(raw) || truthy.include?(raw.to_s)
+      map.repost_flag(raw)
     end
 
     # ---- HTML → 纯文本（绝不执行任何脚本/样式；只做字符串变换）--------------------

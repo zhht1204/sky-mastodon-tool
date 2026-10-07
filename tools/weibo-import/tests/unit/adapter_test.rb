@@ -125,4 +125,71 @@ class AdapterTest < Minitest::Test
     map = build_map
     assert_equal [{ 'id' => '1' }], map.records_of({ 'id' => '1' })
   end
+
+  # ---- repost 判定（唯一实现在 Adapter::Map#repost_flag）----
+
+  def test_repost_flag_nonempty_hash_is_repost
+    map = build_map('repost' => { 'field' => 'retweet' })
+    assert map.repost_flag({ 'id' => '9', 'text' => '原文' })
+  end
+
+  def test_repost_flag_empty_hash_or_array_is_not_repost
+    map = build_map('repost' => { 'field' => 'retweet' })
+    refute map.repost_flag({})
+    refute map.repost_flag([])
+    refute map.repost_flag(nil)
+  end
+
+  def test_repost_flag_scalar_uses_truthy_list
+    map = build_map('repost' => { 'field' => 'is_rt', 'truthy' => [true, 1, 'true', '1'] })
+    assert map.repost_flag(true)
+    assert map.repost_flag('1')
+    refute map.repost_flag(false)
+    refute map.repost_flag(0)
+  end
+
+  # ---- source_url 模板拼接 ----
+
+  def test_source_url_template_interpolation
+    map = build_map('source_url' => { 'template' => 'https://weibo.com/{userId}/{mblogid}' })
+    ex = map.extract('id' => '1', 'created_at' => '2020-01-01 00:00:00', 'text' => 't',
+                     'userId' => '1000000001', 'mblogid' => 'SynPost01')
+    assert_equal 'https://weibo.com/1000000001/SynPost01', ex.source_url
+  end
+
+  def test_source_url_field_takes_precedence_over_template
+    map = build_map('source_url' => { 'field' => 'link', 'template' => 'https://weibo.com/{userId}/{mblogid}' })
+    ex = map.extract('id' => '1', 'created_at' => '2020-01-01 00:00:00', 'text' => 't',
+                     'link' => 'https://weibo.com/1/abc', 'userId' => '2', 'mblogid' => 'x')
+    assert_equal 'https://weibo.com/1/abc', ex.source_url
+  end
+
+  # ---- 转发引用模板与截断上限 ----
+
+  def test_quote_template_composes_from_multiple_fields
+    map = build_map('repost' => { 'field' => 'retweet', 'quote_template' => '转发 @{retweet.user.name}: {retweet.text}' })
+    ex = map.extract('id' => '1', 'created_at' => '2020-01-01 00:00:00', 'text' => 't',
+                     'retweet' => { 'text' => '原文内容', 'user' => { 'name' => '合成作者' } })
+    assert_equal '转发 @合成作者: 原文内容', ex.repost_quote_raw
+  end
+
+  def test_quote_template_missing_paths_become_empty
+    map = build_map('repost' => { 'field' => 'retweet', 'quote_template' => '转发 @{retweet.user.name}: {retweet.text}' })
+    ex = map.extract('id' => '1', 'created_at' => '2020-01-01 00:00:00', 'text' => 't',
+                     'retweet' => { 'text' => '原文' })
+    assert_equal '转发 @: 原文', ex.repost_quote_raw
+  end
+
+  def test_quote_max_configurable_and_zero_disables
+    map200 = build_map('repost' => { 'field' => 'retweet', 'quote_field' => 'retweet.text' })
+    assert_equal 200, map200.repost_quote_max
+    map0 = build_map('repost' => { 'field' => 'retweet', 'quote_field' => 'retweet.text', 'quote_max' => 0 })
+    assert_equal 0, map0.repost_quote_max
+  end
+
+  def test_quote_not_extracted_when_not_repost
+    map = build_map('repost' => { 'field' => 'retweet', 'quote_field' => 'retweet.text' })
+    ex = map.extract('id' => '1', 'created_at' => '2020-01-01 00:00:00', 'text' => 't', 'retweet' => nil)
+    assert_nil ex.repost_quote_raw
+  end
 end

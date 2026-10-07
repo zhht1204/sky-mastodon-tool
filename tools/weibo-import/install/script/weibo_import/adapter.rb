@@ -82,7 +82,8 @@ module WeiboImport
     Extracted = Struct.new(
       :source_id, :created_at_raw, :text_raw, :text_html, :source_url,
       :visibility_raw, :reply_to_raw, :repost_raw, :repost_quote_raw,
-      :media_items, :media_error, keyword_init: true
+      :media_items, :media_error, :retweet_media_items,
+      :interactions, :comments_raw, :card_title, :card_link, keyword_init: true
     )
 
     class Map
@@ -107,7 +108,7 @@ module WeiboImport
         @config = config
         @source = @config['source'].to_s.strip
         @records_root = @config['records_root'].to_s.strip
-        %w[id created_at text source_url visibility reply repost media].each { |k| @config[k] ||= {} }
+        %w[id created_at text source_url visibility reply repost media interactions card].each { |k| @config[k] ||= {} }
       end
 
       def validate!
@@ -154,18 +155,34 @@ module WeiboImport
       def text_field = cfg('text', 'field').to_s
       def text_html? = truthy?(cfg('text', 'html'))
       def source_url_field = cfg('source_url', 'field').to_s
+      def source_url_template = cfg('source_url', 'template').to_s
       def visibility_field = cfg('visibility', 'field').to_s
       def visibility_cfg = @config['visibility']
       def reply_field = cfg('reply', 'field').to_s
       def repost_field = cfg('repost', 'field').to_s
       def repost_truthy = Array(@config.dig('repost', 'truthy')).empty? ? [true, 1, 'true', '1'] : Array(@config.dig('repost', 'truthy'))
       def repost_quote_field = cfg('repost', 'quote_field').to_s
+      def repost_quote_template = cfg('repost', 'quote_template').to_s
+      def repost_quote_max
+        v = cfg('repost', 'quote_max')
+        v.to_s.strip.empty? ? 200 : v.to_i
+      end
       def media_list_field = cfg('media', 'list_field').to_s
+      def media_retweet_list_field = cfg('media', 'retweet_list_field').to_s
 
       def media_cfg
         { 'url' => cfg('media', 'url_field').to_s,
           'path' => cfg('media', 'path_field').to_s,
           'description' => cfg('media', 'description_field').to_s }
+      end
+
+      def interactions_cfg
+        %w[reposts comments_count likes comments].to_h { |k| [k, cfg('interactions', k).to_s] }
+      end
+
+      def card_cfg
+        { 'title' => cfg('card', 'title').to_s,
+          'link' => cfg('card', 'link').to_s }
       end
 
       def timezone = cfg('created_at', 'timezone').to_s.strip
@@ -179,8 +196,18 @@ module WeiboImport
       end
 
       def extract(record)
-        media_items, media_error = extract_media(record)
+        media_items, media_error = extract_media(record, media_list_field)
+        retweet_media, retweet_media_error = extract_media(record, media_retweet_list_field)
+        repost_raw = present_value(Adapter.dig(record, repost_field))
         source_url = present_string(Adapter.dig(record, source_url_field))
+        source_url = present_string(interpolate(source_url_template, record)) if source_url.nil? && !source_url_template.empty?
+        quote_raw = if repost_flag(repost_raw) && !repost_quote_template.empty?
+                      present_value(interpolate(repost_quote_template, record))
+                    elsif repost_flag(repost_raw)
+                      present_value(Adapter.dig(record, repost_quote_field))
+                    end
+        icfg = interactions_cfg
+        ccfg = card_cfg
         Extracted.new(
           source_id: present_string(Adapter.dig(record, id_field)),
           created_at_raw: present_value(Adapter.dig(record, created_at_field)),
@@ -189,25 +216,51 @@ module WeiboImport
           source_url: source_url,
           visibility_raw: present_value(Adapter.dig(record, visibility_field)),
           reply_to_raw: present_value(Adapter.dig(record, reply_field)),
-          repost_raw: present_value(Adapter.dig(record, repost_field)),
-          repost_quote_raw: present_value(Adapter.dig(record, repost_quote_field)),
+          repost_raw: repost_raw,
+          repost_quote_raw: quote_raw,
           media_items: media_items,
-          media_error: media_error
+          media_error: media_error || retweet_media_error,
+          retweet_media_items: retweet_media,
+          interactions: {
+            'reposts' => count_of(record, icfg['reposts']),
+            'comments_count' => count_of(record, icfg['comments_count']),
+            'likes' => count_of(record, icfg['likes'])
+          },
+          comments_raw: list_of(record, icfg['comments']),
+          card_title: present_string(Adapter.dig(record, ccfg['title'])),
+          card_link: present_string(Adapter.dig(record, ccfg['link']))
         )
       end
 
+      # 转发判定的唯一实现：normalize 委托此处，避免两份逻辑漂移
+      def repost_flag(raw)
+        return false if raw.nil?
+        return !raw.empty? if raw.is_a?(Hash) || raw.is_a?(Array)
+
+        truthy = repost_truthy
+        truthy.include?(raw) || truthy.include?(raw.to_s)
+      end
+
       private
+
+      # 模板插值：{dot.path} 从记录取值；路径缺失/为空时整个占位符替换为空串
+      def interpolate(template, record)
+        template.to_s.gsub(/\{([\w.]+)\}/) do
+          v = Adapter.dig(record, Regexp.last_match(1))
+          v.nil? || (v.is_a?(String) && v.strip.empty?) ? '' : v.to_s
+        end
+      end
 
       def cfg(section, key)
         @config.dig(section, key)
       end
 
-      def extract_media(record)
-        return [[], nil] if media_list_field.empty?
+      def extract_media(record, list_field)
+        return [[], nil] if list_field.to_s.empty?
 
-        list = Adapter.dig(record, media_list_field)
+        list = Adapter.dig(record, list_field)
         return [[], nil] if list.nil?
-        return [nil, "媒体字段 #{media_list_field} 不是数组: #{list.class}"] unless list.is_a?(Array)
+        return [nil, "媒体字段 #{list_field} 不是数组: #{list.class}"] unless list.is_a?(Array)
 
         names = media_cfg
         items = list.map do |item|
@@ -226,6 +279,26 @@ module WeiboImport
 
       def present_value(v)
         return nil if v.is_a?(String) && v.strip.empty?
+        v
+      end
+
+      def count_of(record, field)
+        return nil if field.to_s.empty?
+
+        v = Adapter.dig(record, field)
+        return nil if v.nil?
+        return nil if v.is_a?(String) && v.strip.empty?
+
+        v.to_i
+      end
+
+      def list_of(record, field)
+        return nil if field.to_s.empty?
+
+        v = Adapter.dig(record, field)
+        return nil if v.nil?
+        return nil unless v.is_a?(Array)
+
         v
       end
 

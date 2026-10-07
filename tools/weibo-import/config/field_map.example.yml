@@ -27,6 +27,8 @@ text:
 
 source_url:
   field: ""                 # 可选：原文链接字段（导入时保留在正文或 extra，绝不丢弃）
+  # 可选：无直接字段时用模板从记录拼接，占位符 {dot.path} 缺失时替换为空串
+  # 例: "https://weibo.com/{userId}/{mblogid}"
 
 visibility:
   field: ""                 # 可选：可见性字段；整条记录缺该字段时用 default
@@ -41,12 +43,29 @@ reply:
   field: ""                 # 可选：回复目标 ID 字段（缺失/空 = 非回复）
 
 repost:
-  field: ""                 # 可选：转发标记字段
-  truthy: [true, 1, "true", "1"]   # 哪些取值视为“是转发”
+  field: ""                 # 可选：转发标记字段；取值为非空 Hash/Array（如 retweet 对象）时也判定为转发
+  truthy: [true, 1, "true", "1"]   # 标量为布尔/数字/字符串时的“是转发”取值
   quote_field: ""           # 可选：被转发原文摘要字段（无则 repost 摘要为空字符串）
+  # 可选：引用内容模板（优先于 quote_field），占位符 {dot.path} 从记录取值
+  # 例: "转发 @{retweet.user.name}: {retweet.text} {retweet.createdAt}"
+  quote_template: ""
+  quote_max: 200            # 引用内容按字素截断的上限（0 = 不截断）
 
 media:
   list_field: ""            # 可选：媒体数组字段（点路径）
+  retweet_list_field: ""    # 可选：转发原文图片数组字段；--retweet-media include 时按原顺序合并到主列表之后
   url_field: "url"          # 媒体项内：远程 URL 字段名
   path_field: "local_path"  # 媒体项内：本地文件路径字段名（导出自带文件时用）
   description_field: "alt"  # 媒体项内：描述/alt 字段名
+
+# 可选：互动数据字段声明（呈现策略由 normalize 的 --interactions 参数决定，映射只声明位置）
+interactions:
+  reposts: ""               # 转发计数字段
+  comments_count: ""        # 评论计数字段
+  likes: ""                 # 点赞计数字段
+  comments: ""              # 评论内容数组字段（进 JSONL 元数据；--interactions counts 时丢弃）
+
+# 可选：卡片字段声明（呈现策略由 normalize 的 --card 参数决定）
+card:
+  title: ""                 # 卡片标题字段
+  link: ""                  # 卡片链接字段

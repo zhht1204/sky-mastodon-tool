@@ -109,18 +109,29 @@ module WeiboNormalizeCLI
   def run_normalize(argv)
     opts = {
       input: nil, map: 'config/field_map.yml', out: 'normalized.jsonl',
-      raw_dir: nil, errors_out: 'errors.jsonl', default_tz: 'Asia/Shanghai'
+      raw_dir: nil, errors_out: 'errors.jsonl', default_tz: 'Asia/Shanghai',
+      interactions: 'summary', retweet_media: 'include', card: 'ignore'
     }
     OptionParser.new do |o|
-      o.banner = '用法: weibo_normalize.rb normalize --input X --map config/field_map.yml --out normalized.jsonl [--raw-dir raw_copy/] [--default-tz Asia/Shanghai] [--errors-out errors.jsonl]'
+      o.banner = '用法: weibo_normalize.rb normalize --input X --map config/field_map.yml --out normalized.jsonl [--raw-dir raw_copy/] [--default-tz Asia/Shanghai] [--errors-out errors.jsonl] [--interactions summary|metadata|counts] [--retweet-media include|skip] [--card ignore|append]'
       o.on('--input PATH', '导出 JSON/JSONL（必填）') { |v| opts[:input] = v }
       o.on('--map PATH', "字段映射（默认 #{opts[:map]}）") { |v| opts[:map] = v }
       o.on('--out PATH', "输出 JSONL（默认 #{opts[:out]}）") { |v| opts[:out] = v }
       o.on('--raw-dir DIR', '原始记录只读副本目录（每条一个文件 + SHA-256）') { |v| opts[:raw_dir] = v }
       o.on('--default-tz TZ', '时间无时区时的默认时区（默认 Asia/Shanghai；可用 +08:00）') { |v| opts[:default_tz] = v }
       o.on('--errors-out PATH', "错误清单输出（默认 #{opts[:errors_out]}）") { |v| opts[:errors_out] = v }
+      o.on('--interactions MODE', %w[summary metadata counts],
+           '互动数据呈现：summary=正文尾部计数行+评论入元数据（默认）；metadata=全部仅入元数据；counts=仅保留计数，评论丢弃') { |v| opts[:interactions] = v }
+      o.on('--retweet-media MODE', %w[include skip],
+           '转发原文图片：include=按原顺序挂载导入（默认）；skip=仅文字引用') { |v| opts[:retweet_media] = v }
+      o.on('--card MODE', %w[ignore append],
+           '卡片：ignore=忽略（默认）；append=卡片标题+链接追加正文') { |v| opts[:card] = v }
     end.parse(argv)
     raise ArgumentError, 'normalize 需要 --input' if opts[:input].to_s.strip.empty?
+
+    policy = WeiboImport::Normalize.validate_policy!(
+      'interactions' => opts[:interactions], 'retweet_media' => opts[:retweet_media], 'card' => opts[:card]
+    )
 
     map = WeiboImport::Adapter::Map.load(opts[:map])
     default_offset = WeiboImport::Normalize.resolve_tz(opts[:default_tz])
@@ -149,7 +160,7 @@ module WeiboNormalizeCLI
 
       normalized =
         begin
-          WeiboImport::Normalize.normalize_record(rec, map, index: idx, original_line: sources[idx], default_offset: map_tz_offset)
+          WeiboImport::Normalize.normalize_record(rec, map, index: idx, original_line: sources[idx], default_offset: map_tz_offset, policy: policy)
         rescue WeiboImport::Normalize::RecordError => e
           err_f.puts(JSON.generate({ 'record_index' => idx, 'source_id' => (map.extract(rec).source_id rescue nil), 'reason' => e.message }))
           stats[:errors] += 1
@@ -173,6 +184,7 @@ module WeiboNormalizeCLI
     out_f.close
     err_f.close
 
+    stats[:policy] = policy
     puts WeiboImport::Report.normalize_summary(stats)
     warn "错误 #{stats[:errors]} 条已写入 #{opts[:errors_out]}；绝不用当前时间顶替，必须人工复核。" if stats[:errors].positive?
     0

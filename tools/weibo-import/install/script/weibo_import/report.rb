@@ -12,6 +12,8 @@ module WeiboImport
     # ---- normalize 汇总 ----
 
     def normalize_summary(stats)
+      policy = stats[:policy]
+      policy_line = policy ? "#{policy['interactions']} / retweet-media=#{policy['retweet_media']} / card=#{policy['card']}" : '(默认)'
       <<~TEXT
         == normalize 汇总 ==
         输入格式        : #{stats[:format]}
@@ -20,6 +22,7 @@ module WeiboImport
         错误记录        : #{stats[:errors]}
         错误明细        : #{format_error_breakdown(stats[:error_breakdown])}
         媒体条目        : #{stats[:media_items]}（含 url: #{stats[:media_with_url]}，含本地路径: #{stats[:media_with_path]}）
+        呈现策略        : #{policy_line}
         原始副本目录    : #{stats[:raw_dir] || '(未启用)'}
         输出            : #{stats[:out]}
         错误清单        : #{stats[:errors_out]}

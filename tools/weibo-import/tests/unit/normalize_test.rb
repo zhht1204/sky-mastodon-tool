@@ -134,6 +134,90 @@ class NormalizeTest < Minitest::Test
     assert_nil out3['repost']
   end
 
+  def test_zero_width_chars_stripped_from_text
+    out = normalize('id' => '7z', 'created_at' => '2020-05-06T07:08:09+08:00', 'text' => "正文\u200b\uFEFF内容\u200b")
+    assert_equal '正文内容', out['text']
+  end
+
+  # ---- 呈现策略（--interactions / --retweet-media / --card）----
+
+  def norm_map(overrides = {})
+    base = {
+      'source' => 'weibo', 'records_root' => '',
+      'id' => { 'field' => 'id' },
+      'created_at' => { 'field' => 'created_at', 'timezone' => 'Asia/Shanghai' },
+      'text' => { 'field' => 'text', 'html' => false },
+      'media' => { 'list_field' => 'imgs', 'retweet_list_field' => 'retweet.imgs' },
+      'repost' => { 'field' => 'retweet' },
+      'interactions' => { 'reposts' => 'repostsCount', 'comments_count' => 'commentsCount', 'likes' => 'likesCount', 'comments' => 'comments' },
+      'card' => { 'title' => 'card.title', 'link' => 'card.link' }
+    }
+    WeiboImport::Adapter::Map.from_hash(WeiboImport::Adapter.deep_stringify(base.merge(overrides)))
+  end
+
+  def policy_record
+    {
+      'id' => '800', 'created_at' => '2019-08-08T08:09:10+08:00', 'text' => '正文',
+      'repostsCount' => 5, 'commentsCount' => 2, 'likesCount' => 1,
+      'comments' => [{ 'id' => '1', 'text' => '评论' }],
+      'imgs' => ['https://x.example/own.jpg'],
+      'retweet' => { 'text' => '原文', 'imgs' => ['https://x.example/rt1.jpg', 'https://x.example/rt2.jpg'] }
+    }
+  end
+
+  def test_policy_default_summary_line_and_retweet_media_merged
+    out = WeiboImport::Normalize.normalize_record(policy_record, norm_map)
+    assert_equal "正文\n\n原微博：5 转发 · 2 评论 · 1 赞", out['text']
+    assert_equal %w[https://x.example/own.jpg https://x.example/rt1.jpg https://x.example/rt2.jpg], out['media'].map { |m| m['url'] }
+    assert_equal [{ 'id' => '1', 'text' => '评论' }], out['extra']['source_extra']['comments']
+    assert_equal 5, out['extra']['source_extra']['interactions']['reposts']
+    assert_equal 'summary', out['extra']['policy']['interactions']
+  end
+
+  def test_policy_interactions_metadata_keeps_text_clean
+    policy = { 'interactions' => 'metadata', 'retweet_media' => 'include', 'card' => 'ignore' }
+    out = WeiboImport::Normalize.normalize_record(policy_record, norm_map, policy: policy)
+    assert_equal '正文', out['text']
+    assert_equal 5, out['extra']['source_extra']['interactions']['reposts']
+    assert_equal [{ 'id' => '1', 'text' => '评论' }], out['extra']['source_extra']['comments']
+  end
+
+  def test_policy_interactions_counts_drops_comments
+    policy = { 'interactions' => 'counts', 'retweet_media' => 'include', 'card' => 'ignore' }
+    out = WeiboImport::Normalize.normalize_record(policy_record, norm_map, policy: policy)
+    assert_equal '正文', out['text']
+    assert_equal 2, out['extra']['source_extra']['interactions']['comments_count']
+    assert_nil out['extra']['source_extra']['comments']
+  end
+
+  def test_policy_summary_line_omitted_when_all_zero
+    rec = policy_record.merge('repostsCount' => 0, 'commentsCount' => 0, 'likesCount' => 0)
+    out = WeiboImport::Normalize.normalize_record(rec, norm_map)
+    assert_equal '正文', out['text']
+  end
+
+  def test_policy_retweet_media_skip_keeps_own_media_only
+    policy = { 'interactions' => 'summary', 'retweet_media' => 'skip', 'card' => 'ignore' }
+    out = WeiboImport::Normalize.normalize_record(policy_record, norm_map, policy: policy)
+    assert_equal ['https://x.example/own.jpg'], out['media'].map { |m| m['url'] }
+  end
+
+  def test_policy_card_append_adds_title_and_link
+    rec = policy_record.merge('card' => { 'title' => '卡片标题', 'link' => 'https://card.example/x' })
+    policy = { 'interactions' => 'metadata', 'retweet_media' => 'include', 'card' => 'append' }
+    out = WeiboImport::Normalize.normalize_record(rec, norm_map, policy: policy)
+    assert_includes out['text'], "\n\n卡片标题 https://card.example/x"
+  end
+
+  def test_policy_validation_rejects_unknown_mode
+    e = assert_raises(ArgumentError) { WeiboImport::Normalize.validate_policy!('interactions' => 'loud') }
+    assert_includes e.message, '未知 interactions 策略'
+    ok = WeiboImport::Normalize.validate_policy!(nil)
+    assert_equal 'summary', ok['interactions']
+    assert_equal 'include', ok['retweet_media']
+    assert_equal 'ignore', ok['card']
+  end
+
   def test_raw_record_sha256_uses_original_line_when_given
     rec = { 'id' => '1', 'created_at' => '2020-05-06T07:08:09+08:00', 'text' => 'x' }
     a = normalize(rec, MAP, nil, '{"id":"1"}')
