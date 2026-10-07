@@ -1,0 +1,47 @@
+name: Release
+
+# 推送 v* 标签即触发：跑测试 → 打包可直接下载的交付物 → 创建 GitHub Release
+# 交付物内容：script 交付树 + docs + config 模板 + README/LICENSE（tar.gz 与 zip 双格式 + SHA256）
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+
+      - name: Lint & test
+        run: |
+          rake lint
+          rake test
+
+      - name: Build dist archives
+        run: |
+          STAGE="sky-mastodon-tool-weibo-import-${GITHUB_REF_NAME}"
+          mkdir -p "dist/${STAGE}"
+          cp -r tools/weibo-import/install/script "dist/${STAGE}/script"
+          cp -r tools/weibo-import/docs "dist/${STAGE}/docs"
+          cp -r tools/weibo-import/config "dist/${STAGE}/config"
+          cp README.md LICENSE "dist/${STAGE}/"
+          cd dist
+          tar -czf "${STAGE}.tar.gz" "${STAGE}"
+          zip -rq "${STAGE}.zip" "${STAGE}"
+          sha256sum "${STAGE}.tar.gz" "${STAGE}.zip" > SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS.txt
