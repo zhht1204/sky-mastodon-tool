@@ -166,6 +166,10 @@ rake install # deploy/install.ps1 dry-run 预览
 3. 不要提交任何真实账号数据、导出样本、密钥或实例域名——CI/评审会拒绝。
 4. 新增来源平台适配时遵循现有声明式映射风格（`field_map.example.yml`），先 `inspect` 普查再写映射。
 
+## 赞助
+
+这是一个个人维护的开源项目，没有商业收入。如果它帮到了你，欢迎请作者喝杯咖啡：[Ko-fi 赞助](https://ko-fi.com/skyzhou) ☕——完全自愿，不赞助也完全不影响使用。
+
 ## 许可
 
 [MIT](./LICENSE)
