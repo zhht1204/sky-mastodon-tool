@@ -10,7 +10,7 @@ module WeiboImport
 
   class CLI
     VALID_SUBCOMMANDS = %w[plan import verify rollback env-check setup-ledger].freeze
-    PLACEHOLDER_SUBCOMMANDS = %w[import verify rollback setup-ledger].freeze
+    PLACEHOLDER_SUBCOMMANDS = %w[import verify rollback].freeze
     PLACEHOLDER_EXIT_CODE = 2
 
     class ParseFailure < StandardError; end
@@ -72,11 +72,11 @@ module WeiboImport
         o.separator ''
         o.separator '子命令:'
         o.separator '  plan         预演报告（只读；无 Rails 也能跑）'
-        o.separator '  import       真实导入（占位：批次 B）'
-        o.separator '  verify       导入后核对（占位：批次 B）'
-        o.separator '  rollback     回滚（占位：批次 B）'
+        o.separator '  import       真实导入（批次 B；需 Rails + --execute）'
+        o.separator '  verify       导入后核对（批次 B；需 Rails）'
+        o.separator '  rollback     回滚（批次 B；需 Rails；默认 dry-run，真实回滚需 --execute）'
         o.separator '  env-check    实例环境只读检查（需 rails runner 环境）'
-        o.separator '  setup-ledger 创建导入账本表（占位：批次 B）'
+        o.separator '  setup-ledger 创建导入账本表（需 Rails + --execute）'
         o.separator ''
         o.separator '选项:'
         o.on('--account USER', '目标 Mastodon 本地账号（用户名，不含域名）') { |v| @options[:account] = v }

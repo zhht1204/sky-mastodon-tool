@@ -31,13 +31,31 @@ module WeiboImport
       case cli.subcommand
       when 'plan' then run_plan(cli)
       when 'env-check' then EnvCheck.run(account: cli.options[:account])
-      when 'import' then Importer.run(argv)
-      when 'verify' then Verify.run(argv)
-      when 'rollback' then Rollback.run(argv)
-      when 'setup-ledger'
-        $stderr.puts "weibo_import setup-ledger: #{Ledger::TABLE_NAME} #{WeiboImport::Importer::BATCH_NOTE}"
-        CLI::PLACEHOLDER_EXIT_CODE
+      when 'import' then Importer.run(cli)
+      when 'verify' then Verify.run(cli)
+      when 'rollback' then Rollback.run(cli)
+      when 'setup-ledger' then run_setup_ledger(cli)
       end
+    end
+
+    # setup-ledger：幂等创建 sky_import_ledgers（确认门：--execute）
+    def run_setup_ledger(cli)
+      unless defined?(Rails)
+        $stderr.puts 'setup-ledger 必须在 Mastodon Rails 环境运行（rails runner script/weibo_import.rb -- setup-ledger --execute）'
+        return 2
+      end
+      unless cli.options[:execute]
+        puts 'dry-run：将创建/确认辅助账本表（不修改任何 Mastodon 核心表）:'
+        puts
+        puts Ledger.ddl
+        puts
+        puts '确认无误后加 --execute 执行。'
+        return 0
+      end
+
+      result = Ledger.setup!(ActiveRecord::Base.connection)
+      puts result[:created] ? "已创建 #{Ledger::TABLE_NAME}" : "#{Ledger::TABLE_NAME} 已存在（幂等跳过）"
+      0
     end
 
     def run_plan(cli)

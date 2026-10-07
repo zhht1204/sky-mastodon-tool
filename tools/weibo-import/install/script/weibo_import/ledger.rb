@@ -1,14 +1,16 @@
 # frozen_string_literal: true
 
-# 账本（批次 B 实装）。本批次只交付设计：表结构 DDL 常量 + 说明，
-# **不执行任何 DDL、不创建任何表、不改 Mastodon 核心表**。
+# 导入账本：幂等导入的事实来源（批次 B 实装）。
 #
-# 用途：幂等导入的事实来源。(account_id, source, source_id, segment_no) 唯一键
-# 保证同一条来源微博的同一段不会被重复创建；state 记录 planned/imported/
-# partial/failed/rolled_back，rollback 与 resume 都以账本为准。
+# 设计要点：
+# - 独立辅助表 sky_import_ledgers，绝不修改 Mastodon 核心表结构；
+#   id 默认值复用实例内已有的 timestamp_id() PG 函数（与 Mastodon 惯例一致）。
+# - (account_id, source, source_id, segment_no) 唯一约束保证同一来源微博的同一段
+#   不会被重复创建；status 创建与账本行写入在同一数据库事务内（崩溃不会产生
+#   「有帖子无账本」的状态；媒体行在事务外创建，孤儿由 cleanup 处理）。
+# - 会话级 PG advisory lock 串行化同一账号的导入进程。
 #
-# 创建方式：由 setup-ledger 子命令在批次 B 经人工确认后幂等创建
-#（CREATE TABLE IF NOT EXISTS），绝不修改 Mastodon 核心表结构。
+# 本模块只在 Rails（rails runner）环境执行数据库操作；纯逻辑部分可单测。
 
 module WeiboImport
   module Ledger
@@ -16,9 +18,7 @@ module WeiboImport
     STATES = %w[planned imported partial failed rolled_back].freeze
     SPLIT_STRATEGY_VERSION = 1 # splitter 逻辑版本；规则变更时递增
 
-    # 与 Mastodon 现有 timestamp_id() 惯例一致（id 默认值走实例内的 PG 函数）；
-    # 批次 B 校准点：确认实例存在 timestamp_id 函数及序列命名惯例后执行。
-    DDL = <<~SQL
+    DDL_CREATE_TABLE = <<~SQL
       CREATE TABLE IF NOT EXISTS sky_import_ledgers (
         id                       bigint PRIMARY KEY DEFAULT timestamp_id('sky_import_ledgers'::text),
         account_id               bigint NOT NULL,
@@ -27,6 +27,8 @@ module WeiboImport
         split_strategy_version   integer NOT NULL,
         segment_no               integer NOT NULL DEFAULT 0,
         normalized_hash          text NOT NULL,
+        source_created_at        timestamptz NOT NULL,
+        visibility               text NOT NULL,
         batch                    text NOT NULL,
         status_id                bigint,
         media_attachment_ids     jsonb NOT NULL DEFAULT '[]'::jsonb,
@@ -38,33 +40,148 @@ module WeiboImport
           CHECK (state IN ('planned', 'imported', 'partial', 'failed', 'rolled_back')),
         CONSTRAINT sky_import_ledgers_source_uniq
           UNIQUE (account_id, source, source_id, segment_no)
-      );
-      CREATE INDEX IF NOT EXISTS idx_sky_import_ledgers_batch
-        ON sky_import_ledgers (account_id, batch, state);
+      )
     SQL
 
-    ADVISORY_LOCK_NOTE = <<~TEXT
-      批次 B 导入时用 PG advisory lock 串行化（防止并发导入同一账号）：
+    DDL_INDEX_BATCH = <<~SQL
+      CREATE INDEX IF NOT EXISTS idx_sky_import_ledgers_batch
+        ON sky_import_ledgers (account_id, batch, state)
+    SQL
 
-        SELECT pg_advisory_lock(hashtext('sky_weibo_import:<account_id>'));
-        -- 导入主体（逐条 upsert 账本 + 建 Status，同一事务或明确补偿）
-        SELECT pg_advisory_unlock(hashtext('sky_weibo_import:<account_id>'));
+    DDL_INDEX_STATUS = <<~SQL
+      CREATE INDEX IF NOT EXISTS idx_sky_import_ledgers_status
+        ON sky_import_ledgers (status_id) WHERE status_id IS NOT NULL
+    SQL
 
-      注意：
-      1) Rails 连接池下 lock/unlock 必须落在同一连接（如 ActiveRecord::Base.connection 原生执行，
-         并在 ensure 中 unlock），否则可能出现悬挂锁。
-      2) 设置 statement_timeout 与最长持锁时间上限；批次结束（含异常）必须释放。
-      3) 会话级 advisory lock 在连接断开时自动释放，是较安全的默认选择。
-    TEXT
+    DDL_STATEMENTS = [DDL_CREATE_TABLE, DDL_INDEX_BATCH, DDL_INDEX_STATUS].freeze
+
+    LOCK_NAMESPACE = 'sky_weibo_import'
 
     module_function
 
     def ddl
-      DDL
+      DDL_STATEMENTS.join(";\n")
     end
 
-    def setup!(**_options)
-      raise 'setup-ledger 为批次 B 交付：本批次不创建任何数据库对象（设计见 WeiboImport::Ledger::DDL）'
+    # 幂等建表（setup-ledger 子命令调用；须在确认门后执行）
+    # 返回 { created: bool, already_existed: bool }
+    def setup!(connection)
+      existed = exists?(connection)
+      DDL_STATEMENTS.each { |stmt| connection.execute(stmt) }
+      { created: !existed, already_existed: existed }
+    end
+
+    def exists?(connection)
+      connection.select_value(
+        "SELECT EXISTS (SELECT 1 FROM pg_class WHERE relname = '#{TABLE_NAME}')::int"
+      ).to_i == 1
+    end
+
+    # ---- 会话级 advisory lock（同账号串行；导入全程持锁，ensure 释放）----
+
+    def lock_key(account_id)
+      "#{LOCK_NAMESPACE}:#{account_id}"
+    end
+
+    # 尝试在 timeout_seconds 内获取锁；拿不到返回 false（调用方应中止而非阻塞等待）
+    def acquire_lock!(connection, account_id, timeout_seconds: 60)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout_seconds
+      key = lock_key(account_id)
+      loop do
+        got = connection.select_value(
+          "SELECT pg_try_advisory_lock(hashtext('#{key}'))::int"
+        ).to_i == 1
+        return true if got
+        return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+        sleep 1
+      end
+    end
+
+    def release_lock!(connection, account_id)
+      connection.execute("SELECT pg_advisory_unlock(hashtext('#{lock_key(account_id)}'))")
+    rescue StandardError
+      # 连接已断开时锁随会话自动释放
+      nil
+    end
+
+    # ---- 行操作（raw SQL，避免向 Mastodon 应用注入 AR 模型）----
+
+    def rows_for(connection, account_id, source, source_id)
+      connection.select_all(<<~SQL.squish).to_a
+        SELECT * FROM #{TABLE_NAME}
+        WHERE account_id = #{account_id.to_i}
+          AND source = #{connection.quote(source)}
+          AND source_id = #{connection.quote(source_id)}
+        ORDER BY segment_no
+      SQL
+    end
+
+    def imported_source_ids(connection, account_id, source)
+      connection.select_all(<<~SQL.squish).to_a
+        SELECT source_id,
+               COUNT(*) AS segments,
+               COUNT(*) FILTER (WHERE state = 'imported') AS imported_segments,
+               COUNT(*) FILTER (WHERE state = 'partial')  AS partial_segments,
+               COUNT(*) FILTER (WHERE state = 'failed')   AS failed_segments,
+               MAX(normalized_hash) AS normalized_hash
+        FROM #{TABLE_NAME}
+        WHERE account_id = #{account_id.to_i} AND source = #{connection.quote(source)}
+        GROUP BY source_id
+      SQL
+    end
+
+    def batch_rows(connection, account_id, batch)
+      connection.select_all(<<~SQL.squish).to_a
+        SELECT * FROM #{TABLE_NAME}
+        WHERE account_id = #{account_id.to_i} AND batch = #{connection.quote(batch)}
+        ORDER BY source_created_at, segment_no
+      SQL
+    end
+
+    # 同事务写入一行（由 importer 在 Status 创建的同一事务内调用）
+    # attrs: account_id/source/source_id/segment_no/normalized_hash/source_created_at/
+    #        visibility/batch/status_id/media_attachment_ids/state
+    def insert_row!(connection, attrs)
+      connection.execute(<<~SQL.squish)
+        INSERT INTO #{TABLE_NAME}
+          (account_id, source, source_id, split_strategy_version, segment_no,
+           normalized_hash, source_created_at, visibility, batch,
+           status_id, media_attachment_ids, state, error)
+        VALUES
+          (#{attrs.fetch(:account_id).to_i},
+           #{connection.quote(attrs.fetch(:source))},
+           #{connection.quote(attrs.fetch(:source_id))},
+           #{SPLIT_STRATEGY_VERSION},
+           #{attrs.fetch(:segment_no).to_i},
+           #{connection.quote(attrs.fetch(:normalized_hash))},
+           #{connection.quote(attrs.fetch(:source_created_at))},
+           #{connection.quote(attrs.fetch(:visibility))},
+           #{connection.quote(attrs.fetch(:batch))},
+           #{attrs[:status_id].to_i},
+           #{connection.quote(JSON.generate(attrs.fetch(:media_attachment_ids, [])))}::jsonb,
+           #{connection.quote(attrs.fetch(:state, 'imported'))},
+           #{attrs[:error] ? connection.quote(attrs[:error][0, 2000]) : 'NULL'})
+      SQL
+    end
+
+    def mark_rolled_back!(connection, row_id)
+      connection.execute(<<~SQL.squish)
+        UPDATE #{TABLE_NAME}
+        SET state = 'rolled_back', status_id = NULL, updated_at = now()
+        WHERE id = #{row_id.to_i}
+      SQL
+    end
+
+    # 孤儿媒体行（status_id 为空且创建于某时刻之后）——崩溃恢复/清理用
+    def orphan_media_since(connection, account_id, since_iso8601)
+      connection.select_all(<<~SQL.squish).to_a
+        SELECT id FROM media_attachments
+        WHERE account_id = #{account_id.to_i}
+          AND status_id IS NULL
+          AND created_at >= #{connection.quote(since_iso8601)}
+        ORDER BY id
+      SQL
     end
   end
 end

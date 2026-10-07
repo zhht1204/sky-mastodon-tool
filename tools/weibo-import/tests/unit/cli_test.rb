@@ -47,20 +47,19 @@ class CliTest < Minitest::Test
   end
 
   def test_placeholder_subcommands_flagged
-    %w[import verify rollback setup-ledger].each do |sub|
+    %w[import verify rollback].each do |sub|
       cli = parse([sub])
       assert_equal sub, cli.subcommand
       assert cli.placeholder?
     end
     assert_equal 2, WeiboImport::CLI::PLACEHOLDER_EXIT_CODE
+    # setup-ledger 已实装，不再是占位
+    refute parse(['setup-ledger']).placeholder?
   end
 
   def test_placeholder_modules_refuse_to_run
-    assert_equal 2, WeiboImport::Importer.run([])
-    assert_equal 2, WeiboImport::Verify.run([])
-    assert_equal 2, WeiboImport::Rollback.run([])
-    assert_equal 2, WeiboImport::Silence.run([])
-    err = assert_raises(RuntimeError) { WeiboImport::Ledger.setup! }
-    assert_includes err.message, '批次 B'
+    assert_equal 2, WeiboImport::Importer.run(parse(['import']))
+    assert_equal 2, WeiboImport::Verify.run(parse(['verify']))
+    assert_equal 2, WeiboImport::Rollback.run(parse(['rollback']))
   end
 end
