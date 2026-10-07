@@ -14,7 +14,9 @@ else
       password: SecureRandom.hex(8),
       account: account,
       agreement: true,
+      # approved 布尔列不会联动 approved_at；待审批账号的个人页会 404（check_account_approval）
       approved: true,
+      approved_at: Time.current,
       confirmed_at: Time.current
     )
   end

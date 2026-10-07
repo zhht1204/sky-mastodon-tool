@@ -47,6 +47,8 @@ services:
         condition: service_healthy
     volumes:
       - media-data:/opt/mastodon/public/system
+      # testenv 专用：production 环境下禁用 force_ssl/use_https（详见文件头注释）
+      - ./config/2_testenv_http.rb:/opt/mastodon/config/initializers/2_testenv_http.rb:ro
 
   sidekiq:
     image: ghcr.io/mastodon/mastodon:v4.6.2
@@ -59,6 +61,7 @@ services:
         condition: service_healthy
     volumes:
       - media-data:/opt/mastodon/public/system
+      - ./config/2_testenv_http.rb:/opt/mastodon/config/initializers/2_testenv_http.rb:ro
 
 volumes:
   db-data:
