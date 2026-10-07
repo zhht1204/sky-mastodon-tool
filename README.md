@@ -9,7 +9,7 @@
 | 批次 | 状态 | 范围 |
 |---|---|---|
 | A | **已交付** | CLI 骨架（`plan`/`env-check` 真实可用，`import`/`verify`/`rollback`/`setup-ledger` 占位）；`weibo_normalize.rb`（`inspect`/`map`/`normalize`/`fetch-media` 纯 Ruby 可独立运行）；splitter / id_allocator / ledger 设计 / backup 编排（dry-run）；minitest 单测与本地端到端演练。**无任何生产实例访问、无真实导入写入、无数据库表创建。** |
-| B | 待启动 | 前置条件：①隔离测试实例——本仓已提供 [`tools/weibo-import/testenv/`](tools/weibo-import/testenv/README.md) 一键编排（Mastodon v4.6.2 + 独立 PG/Redis，仅绑 127.0.0.1）；②真实导出 JSON 样本；③在实例上实测 `env-check` 并按部署源码校准 Snowflake/字符计数常量。交付：`import`/`verify`/`rollback`/`setup-ledger`、静默回调抑制、账本实装、试导入 20 条验收。 |
+| B | **已交付**（隔离实例验证） | 实装 `import`/`verify`/`rollback`/`setup-ledger`、静默回调抑制（定向 no-op + 审计）、账本表（唯一约束 + advisory lock + UPSERT）、确定性历史 Snowflake ID（`override_timestamps` 显式 ID 已验证不被覆盖）。隔离实例（4.6.2）实测：试导入 20 条 → verify PASS → 幂等重跑 → 回滚 → 全量重建闭环；网页核验 2012 原时间线/转发引用/互动摘要/原文链接/图片正常。剩余：生产实例 env-check 校准 + 试导入验收（G4/G5 确认门）→ 批次 C。 |
 | C | 待启动 | 全量导入与收尾：完整计数口径对账、回滚演练、批次归档。 |
 
 ## 快速开始（Windows 开发机）

@@ -1,7 +1,7 @@
 # weibo-import 操作手册（微博 JSON → Mastodon 历史归档导入）
 
 > 本手册是 weibo-import 的**唯一操作入口**。批次 A 已交付只读阶段（inspect / map / normalize / fetch-media / plan / env-check）；
-> 写入阶段（import / verify / rollback / setup-ledger / silence）为占位，批次 B 交付后按本手册执行。
+> 写入阶段（import / verify / rollback / setup-ledger）已在批次 B 实装，并在隔离实例（4.6.2）完成 20 条试导入全生命周期验证（导入→verify PASS→幂等重跑→回滚→重建）。
 >
 > 实例事实以 `env-check` 实测为准；标称版本 4.6.2 仅为假设，不得作为依据。
 
@@ -43,6 +43,10 @@
 > **占位符清单**：`<服务名>`（compose 里跑 rails 的服务，常见 `web`/`sidekiq`/`app`）、
 > `/mastodon`（容器内 Mastodon 目录）、`/opt/sky`（脚本安装目录）、`<本地账号>`、`RAILS_ENV`。
 > 先跑 `deploy/compose-usage.md` §0 的无害探针验证参数传递，再执行真实命令。
+>
+> **参数传递注意（4.6.2 实测）**：runner 与脚本参数之间需要 `--` 分隔。
+> 呈现策略在 normalize 阶段固化：`--interactions summary|metadata|counts`（默认 summary）、
+> `--retweet-media include|skip`（默认 include）、`--card ignore|append`（默认 ignore）。
 
 ### 2.1 docker compose exec（容器部署）
 
@@ -58,9 +62,15 @@ docker compose exec -T <服务名> sh -lc \
 docker compose exec -T <服务名> sh -lc \
   'cd /mastodon && bin/rails runner /opt/sky/script/weibo_import.rb plan --account <本地账号> --input /opt/sky/normalized.jsonl --report-file /opt/sky/reports/plan.md'
 
-# 批次 B 写命令统一形态（当前为占位，退出码 2）：
+# 写命令（批次 B 已实装；`--` 之后是脚本参数，已在 4.6.2 实测）：
 docker compose exec -T <服务名> sh -lc \
-  'cd /mastodon && RAILS_ENV=production bin/rails runner /opt/sky/script/weibo_import.rb import --account <本地账号> --input /opt/sky/normalized.jsonl --batch B001 --execute'
+  'cd /mastodon && RAILS_ENV=production bin/rails runner /opt/sky/script/weibo_import.rb -- setup-ledger --execute'
+docker compose exec -T <服务名> sh -lc \
+  'cd /mastodon && RAILS_ENV=production bin/rails runner /opt/sky/script/weibo_import.rb -- import --account <本地账号> --input /opt/sky/normalized.jsonl --media-dir /opt/sky/media --batch pilot-001 --limit 20 --execute --yes'
+docker compose exec -T <服务名> sh -lc \
+  'cd /mastodon && RAILS_ENV=production bin/rails runner /opt/sky/script/weibo_import.rb -- verify --account <本地账号> --batch pilot-001'
+docker compose exec -T <服务名> sh -lc \
+  'cd /mastodon && RAILS_ENV=production bin/rails runner /opt/sky/script/weibo_import.rb -- rollback --account <本地账号> --batch pilot-001'            # 默认 dry-run
 ```
 
 ### 2.2 rails runner（源码部署）
@@ -71,8 +81,11 @@ sudo -u mastodon bash -lc 'cd /srv/mastodon && RAILS_ENV=production bin/rails ru
 # plan（无 Rails 依赖，也可直接在开发机跑纯 Ruby）：
 sudo -u mastodon bash -lc 'cd /srv/mastodon && bin/rails runner script/weibo_import.rb plan --account <本地账号> --input /opt/sky/normalized.jsonl'
 
-# 批次 B 写命令统一形态（当前为占位）：
-sudo -u mastodon bash -lc 'cd /srv/mastodon && RAILS_ENV=production bin/rails runner script/weibo_import.rb import --account <本地账号> --input /opt/sky/normalized.jsonl --batch B001 --execute'
+# 写命令（批次 B 已实装）：
+sudo -u mastodon bash -lc 'cd /srv/mastodon && RAILS_ENV=production bin/rails runner script/weibo_import.rb -- setup-ledger --execute'
+sudo -u mastodon bash -lc 'cd /srv/mastodon && RAILS_ENV=production bin/rails runner script/weibo_import.rb -- import --account <本地账号> --input /opt/sky/normalized.jsonl --media-dir /opt/sky/media --batch pilot-001 --limit 20 --execute --yes'
+sudo -u mastodon bash -lc 'cd /srv/mastodon && RAILS_ENV=production bin/rails runner script/weibo_import.rb -- verify --account <本地账号> --batch pilot-001'
+sudo -u mastodon bash -lc 'cd /srv/mastodon && RAILS_ENV=production bin/rails runner script/weibo_import.rb -- rollback --account <本地账号> --batch pilot-001'
 ```
 
 ### 2.3 开发机纯 Ruby 工具链（不需要实例）

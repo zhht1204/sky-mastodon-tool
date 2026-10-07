@@ -29,7 +29,7 @@
 ## 红线（批次边界）
 
 - **未经 `docs/weibo-import.md` 定义的确认门，不得对生产实例做任何写入。**
-- 批次 A：`import` / `verify` / `rollback` / `setup-ledger` 是占位（批次 B 交付）；`plan` / `env-check`（Rails 部分）与 `weibo_normalize.rb` 的 `inspect`/`map`/`normalize`/`fetch-media` 真实可用。
+- 批次 A/B 已交付：`plan` / `env-check` / `normalize` 工具链与 `import` / `verify` / `rollback` / `setup-ledger` 全部实装，写入命令须 `--execute`（非交互再加 `--yes`）。
 - 时间保真：绝不修改来源时间；无法解析/异常时间进错误清单，绝不用当前时间顶替。
 - 可见性只能收紧不能放宽；导入默认 `unlisted`。
 - 绝不为了排序人为增减 `created_at`（Snowflake ID 分配同样不得改动 `created_at`）。
