@@ -1,0 +1,52 @@
+# 字段映射示例（声明式）
+#
+# 红线流程：必须先用 `weibo_normalize.rb inspect --input <真实导出.json> --sample 20`
+# 生成字段普查报告（docs/field-mapping-report.generated.md 草稿），
+# 逐字段人工核对后填写本文件。**禁止凭想象假设导出工具的字段名。**
+#
+# 生成/安装真实映射：
+#   ruby weibo_normalize.rb map --from <人工确认后的草稿.yml> --out config/field_map.yml
+# （config/field_map.yml 已被 gitignore，仓库零数据）
+
+source: weibo
+
+# 可选：导出文件顶层是包装对象（如 {"meta": {...}, "data": [...]}）时，记录数组的点路径。
+# 顶层就是数组或 JSONL 时留空。
+records_root: ""            # 例: "data" / "statuses.items"
+
+id:
+  field: ""                 # 必填：ID 字段（点路径，如 "id" / "mblog.id"）。值全程按字符串处理，禁止整数解析
+
+created_at:
+  field: ""                 # 必填：时间字段。支持 ISO8601/常见日期格式/epoch 秒|毫秒
+  timezone: "Asia/Shanghai" # 仅当时间本身不带时区/偏移时使用；带偏移则尊重原偏移。固定偏移写法: "+08:00"
+
+text:
+  field: ""                 # 必填：正文字段
+  html: false               # true = 字段含 HTML（只做 HTML→纯文本，绝不执行脚本/渲染）
+
+source_url:
+  field: ""                 # 可选：原文链接字段（导入时保留在正文或 extra，绝不丢弃）
+
+visibility:
+  field: ""                 # 可选：可见性字段；整条记录缺该字段时用 default
+  default: unlisted         # 缺省映射（保守侧）；允许 public/unlisted/private/direct
+  mapping: {}               # 来源取值 -> 目标可见性，例: {public: public, friends: private}
+                            # 非公开内容只能映射为同级或更严格，绝不放宽（加载时校验）
+  strictness: {}            # 来源取值 -> 0..3，声明来源私密程度（0=最公开, 3=最私密）。
+                            # 映射目标的 rank 必须 >= 该值，否则映射文件校验失败。
+                            # 例: {friends: 2, onlyme: 3}
+
+reply:
+  field: ""                 # 可选：回复目标 ID 字段（缺失/空 = 非回复）
+
+repost:
+  field: ""                 # 可选：转发标记字段
+  truthy: [true, 1, "true", "1"]   # 哪些取值视为“是转发”
+  quote_field: ""           # 可选：被转发原文摘要字段（无则 repost 摘要为空字符串）
+
+media:
+  list_field: ""            # 可选：媒体数组字段（点路径）
+  url_field: "url"          # 媒体项内：远程 URL 字段名
+  path_field: "local_path"  # 媒体项内：本地文件路径字段名（导出自带文件时用）
+  description_field: "alt"  # 媒体项内：描述/alt 字段名

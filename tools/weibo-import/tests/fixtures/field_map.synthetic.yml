@@ -1,0 +1,35 @@
+# 合成夹具映射（tests/fixtures/* 专用；与 fixture 字段一一对应）
+# 真实导出必须先用 inspect 普查后另写映射，禁止直接套用本文件。
+source: weibo
+records_root: ""            # synthetic_wrapped.json 用 "data"
+id:
+  field: "id"
+created_at:
+  field: "created_at"
+  timezone: "Asia/Shanghai"
+text:
+  field: "text"
+  html: false
+source_url:
+  field: "source_url"
+visibility:
+  field: "scope"
+  default: unlisted
+  mapping:
+    public: public
+    friends: private
+    onlyme: direct
+  strictness:
+    friends: 2
+    onlyme: 3
+reply:
+  field: "reply_to_id"
+repost:
+  field: "reposted"
+  truthy: [true, 1, "true", "1"]
+  quote_field: "repost_quote"
+media:
+  list_field: "pictures"
+  url_field: "url"
+  path_field: "local_path"
+  description_field: "alt"

@@ -1,0 +1,6 @@
+# 统一换行：实例端（Linux）要跑的脚本必须是 LF，防止 Windows CRLF 破坏 bash/ruby
+*.rb text eol=lf
+*.sh text eol=lf
+# Windows 侧 PowerShell 脚本保持 CRLF
+*.ps1 text eol=crlf
+# 文档与其他文本按 Git 默认处理

@@ -1,0 +1,12 @@
+# 仓库零数据红线：真实数据/媒体/备份/密钥/真实映射一律不入库
+# 注：含 “/” 的模式会锚定到仓库根，必须用 ** 前缀才能覆盖 tools/* 子目录
+**/config/field_map.yml
+media/
+raw_copy/
+backups/
+reports/
+tmp/
+.env*
+*.jsonl
+!**/tests/fixtures/**/*.jsonl
+**/docs/field-mapping-report.generated.md
