@@ -9,7 +9,7 @@
 1. **不适用全栈 Next.js/go-zero 标准**：无 `web/`/`server/` 目录、无前后端分层脚手架、无数据库迁移体系。
 2. **不接入 sky-sso**：无登录界面；身份 = 目标本地 Mastodon 账号 + 服务器服务用户 + 每步确认门。
 3. **语言基线例外**：本仓库主体是 Ruby（运行侧 stdlib-only 脚本 + minitest），Node >= 24 / pnpm 基线不适用。
-4. **不自带 PostgreSQL/Redis/存储**：复用目标实例的 DB/Redis/媒体存储，仓库内不出现常驻 compose 服务。
+4. **不自带 PostgreSQL/Redis/存储**：复用目标实例的 DB/Redis/媒体存储，仓库内不出现常驻 compose 服务。唯一例外：`tools/weibo-import/testenv/` 的**一次性**本地测试编排（批次 B 集成测试用），必须用后即 `teardown.ps1`（`down -v`）销毁。
 5. **仓库零数据**：数据/媒体/备份/密钥/真实字段映射（`config/field_map.yml`）一律 gitignore；测试 fixture 全部为自制合成数据，绝不包含真实微博内容。
 
 ## 命令
@@ -17,6 +17,8 @@
 - `rake test` — 运行 `tools/weibo-import/tests/unit` 全部 minitest（纯逻辑，无需实例）。
 - `rake lint` — 对 `install/` 树与 `tests/` 逐文件 `ruby -c` 语法检查。
 - `rake install` — 调用 `deploy/install.ps1`（默认 dry-run 预览；真复制需 `-Execute`）。
+- `tools/weibo-import/testenv/setup.ps1` — 一键初始化隔离 Mastodon 4.6.2 测试容器（仅绑 127.0.0.1，见该目录 README）。
+- `tools/weibo-import/testenv/teardown.ps1` — 销毁测试容器与全部数据卷（共享 Docker 环境必须用后即清）。
 
 ## 执行环境
 

@@ -1,0 +1,66 @@
+# 一次性隔离 Mastodon 4.6.2 测试环境（批次 B 集成测试用，用后必须 teardown.ps1 清理）
+#
+# 隔离性设计：
+# - 独立 compose project 名（weibo-import-testenv）与命名卷，不与本机其他容器混用；
+# - web 仅绑定 127.0.0.1:46500，不对外网/局域网暴露；
+# - LOCAL_DOMAIN 为本机地址，联邦域名天然不可解析，不会向实例外发送任何联邦消息；
+# - S3 / Elasticsearch 关闭，媒体存储在本地命名卷，随 down -v 一并销毁；
+# - Redis 关闭持久化（throwaway）。
+name: weibo-import-testenv
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mastodon
+      POSTGRES_PASSWORD: ${DB_PASS:?missing DB_PASS - run setup.ps1 to generate .env first}
+      POSTGRES_DB: mastodon
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'mastodon', '-d', 'mastodon']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  web:
+    image: ghcr.io/mastodon/mastodon:v4.6.2
+    command: ['bundle', 'exec', 'rails', 's', '-p', '3000']
+    env_file: .env
+    ports:
+      - '127.0.0.1:46500:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - media-data:/opt/mastodon/public/system
+
+  sidekiq:
+    image: ghcr.io/mastodon/mastodon:v4.6.2
+    command: ['bundle', 'exec', 'sidekiq']
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - media-data:/opt/mastodon/public/system
+
+volumes:
+  db-data:
+  redis-data:
+  media-data:
