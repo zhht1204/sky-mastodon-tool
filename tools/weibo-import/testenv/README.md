@@ -30,6 +30,7 @@ powershell -ExecutionPolicy Bypass -File teardown.ps1 -RemoveEnv  # 连 .env 一
 
 - 实例地址：`http://127.0.0.1:46500`（健康检查 `/health`）
 - 本地账号：默认 `importer`（供 `weibo_import.rb --account importer` 使用）
+  - 由 `create_account.rb` 离线创建：仅在该 runner 进程内屏蔽真实发信与 EmailMxValidator（`.test` 域无 MX、实例无 SMTP，`tootctl accounts create` 会因此失败）
 - Rails 入口（批次 B 脚本就位后）：
   ```powershell
   docker compose exec -T web bundle exec rails runner -e production script/weibo_import.rb -- plan --account importer --input /import/normalized.jsonl

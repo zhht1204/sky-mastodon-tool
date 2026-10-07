@@ -1,4 +1,4 @@
-# 销毁一次性 Mastodon 测试环境：停止并删除全部容器、网络与数据卷（db/redis/media）。
+﻿# 销毁一次性 Mastodon 测试环境：停止并删除全部容器、网络与数据卷（db/redis/media）。
 # -RemoveEnv 同时删除本地生成的 .env（密钥随之丢弃）。
 param(
   [switch]$RemoveEnv
