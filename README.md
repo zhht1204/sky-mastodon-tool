@@ -131,7 +131,7 @@ rake install # deploy/install.ps1 dry-run 预览
 
 ## 许可
 
-尚未声明。公开引用/二次开发前请先通过 issue 联系作者确认授权。
+[MIT](./LICENSE)
 
 ---
 
