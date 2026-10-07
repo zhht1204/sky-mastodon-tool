@@ -30,9 +30,46 @@ Mastodon 自带的导入功能只支持关注列表等数据，**不支持带原
 | 开发机（解析/下载/预演） | Ruby ≥ 3.2（仅标准库 + minitest）；媒体下载需可访问来源 CDN |
 | 实例侧（导入/验证/回滚） | Mastodon 4.6.x（源码逻辑按部署版本实测校准）；`rails runner` 或 `docker compose exec` 执行入口 |
 
+## 安装（二选一）
+
+### 方式 A：下载 Release 产物（推荐，面向使用者）
+
+从 [Releases](../../releases) 下载 `sky-mastodon-tool-weibo-import-v<版本>.zip`（或 `.tar.gz`，附 `SHA256SUMS.txt` 校验），解压即得：
+
+```text
+sky-mastodon-tool-weibo-import-v<版本>/
+├── script/    # CLI 与全部模块（交付树）
+├── docs/      # 操作手册 / 静默回调审计清单 / 映射报告模板
+├── config/    # field_map.example.yml 映射模板
+└── README.md / LICENSE
+```
+
+- **开发机**（解析/下载/预演）：直接在解压目录使用，下文所有 `tools/weibo-import/install/script/…` 路径替换为 `script/…`；映射放解压目录的 `config/field_map.yml`。
+- **实例侧**（导入/验证/回滚）：把 `script/` 交付树复制进实例——
+
+```bash
+# 源码部署：整树放到 Mastodon 目录（之后的命令统一是 script/weibo_import.rb …）
+tar -xzf sky-mastodon-tool-weibo-import-v*.tar.gz
+cp -r sky-mastodon-tool-weibo-import-v*/script/ /srv/mastodon/script/
+
+# docker compose 部署：复制进容器后入口加 -- 分隔符
+docker compose cp sky-mastodon-tool-weibo-import-v*/script/. <web服务>:/opt/mastodon/script/
+docker compose exec -T <web服务> bundle exec rails runner script/weibo_import.rb -- plan --account <账号> --input /path/normalized.jsonl
+```
+
+### 方式 B：git clone（面向开发者/贡献者）
+
+```powershell
+git clone https://github.com/zhht1204/sky-mastodon-tool.git
+cd sky-mastodon-tool
+rake test   # 跑通 139 个单元测试确认环境可用
+```
+
 ## 快速开始
 
 ### 1）开发机：解析与预演（不需要实例）
+
+以下示例以 **clone 方式** 的仓库路径书写；Release 产物用户按上文替换为解压目录路径。
 
 ```powershell
 git clone <本仓库>
