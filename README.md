@@ -168,7 +168,8 @@ rake install # deploy/install.ps1 dry-run 预览
 
 ## 赞助
 
-这是一个个人维护的开源项目，没有商业收入。如果它帮到了你，欢迎请作者喝杯咖啡：[Ko-fi 赞助](https://ko-fi.com/skyzhou) ☕——完全自愿，不赞助也完全不影响使用。
+这是一个个人维护的开源项目，没有商业收入。如果它帮到了你，欢迎请作者的小朋友喝杯果汁：[https://ko-fi.com/skyzhou](https://ko-fi.com/skyzhou) ☕——完全自愿，不赞助也完全不影响使用。
+This is a personal open-source project maintained by an individual, with no commercial revenue. If it has helped you, feel free to support the author by buying a cup of juice: [https://ko-fi.com/skyzhou](https://ko-fi.com/skyzhou) ☕ — completely voluntary, and not supporting does not affect usage at all.
 
 ## 许可
 
