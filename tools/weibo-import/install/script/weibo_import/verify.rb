@@ -24,8 +24,8 @@ module WeiboImport
       raise ArgumentError, 'verify 需要 --account' if opts[:account].to_s.strip.empty?
       raise ArgumentError, 'verify 需要 --batch 或 --input 之一（按账本核对）' if opts[:batch].to_s.strip.empty?
 
-      require_relative 'weibo_import/ledger'
-      require_relative 'weibo_import/id_allocator'
+      require_relative 'ledger'
+      require_relative 'id_allocator'
 
       account = Account.find_local(opts[:account].to_s.strip)
       raise "账号不存在: #{opts[:account]}" if account.nil?

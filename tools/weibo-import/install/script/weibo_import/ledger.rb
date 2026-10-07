@@ -53,7 +53,19 @@ module WeiboImport
         ON sky_import_ledgers (status_id) WHERE status_id IS NOT NULL
     SQL
 
-    DDL_STATEMENTS = [DDL_CREATE_TABLE, DDL_INDEX_BATCH, DDL_INDEX_STATUS].freeze
+    # timestamp_id() 的序列默认只对 Mastodon 自有表存在（其迁移里建）；
+    # 账本表用同一默认值就必须自己幂等补建序列（写法对齐 Mastodon 的 ensure_id_sequences_exist）
+    DDL_SEQUENCE = <<~SQL
+      DO $$
+        BEGIN
+          CREATE SEQUENCE sky_import_ledgers_id_seq;
+        EXCEPTION WHEN duplicate_table THEN
+          NULL;
+        END
+      $$ LANGUAGE plpgsql
+    SQL
+
+    DDL_STATEMENTS = [DDL_CREATE_TABLE, DDL_INDEX_BATCH, DDL_INDEX_STATUS, DDL_SEQUENCE].freeze
 
     LOCK_NAMESPACE = 'sky_weibo_import'
 
@@ -139,7 +151,9 @@ module WeiboImport
       SQL
     end
 
-    # 同事务写入一行（由 importer 在 Status 创建的同一事务内调用）
+    # 同事务写入一行（由 importer 在 Status 创建的同一事务内调用）。
+    # UPSERT：回滚后重新导入时复用既有行（唯一键命中则刷新为新 status_id/状态）；
+    # 非 rolled_back 命中由 importer 的 precheck 提前拦截，不会走到这里。
     # attrs: account_id/source/source_id/segment_no/normalized_hash/source_created_at/
     #        visibility/batch/status_id/media_attachment_ids/state
     def insert_row!(connection, attrs)
@@ -162,6 +176,16 @@ module WeiboImport
            #{connection.quote(JSON.generate(attrs.fetch(:media_attachment_ids, [])))}::jsonb,
            #{connection.quote(attrs.fetch(:state, 'imported'))},
            #{attrs[:error] ? connection.quote(attrs[:error][0, 2000]) : 'NULL'})
+        ON CONFLICT (account_id, source, source_id, segment_no) DO UPDATE SET
+          normalized_hash = EXCLUDED.normalized_hash,
+          source_created_at = EXCLUDED.source_created_at,
+          visibility = EXCLUDED.visibility,
+          batch = EXCLUDED.batch,
+          status_id = EXCLUDED.status_id,
+          media_attachment_ids = EXCLUDED.media_attachment_ids,
+          state = EXCLUDED.state,
+          error = EXCLUDED.error,
+          updated_at = now()
       SQL
     end
 

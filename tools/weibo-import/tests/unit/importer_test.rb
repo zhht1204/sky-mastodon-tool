@@ -58,6 +58,8 @@ class ImporterTest < Minitest::Test
     assert_equal :skip, I.precheck([{ 'normalized_hash' => h, 'state' => 'imported' }], h)
     assert_equal :partial_skip, I.precheck([{ 'normalized_hash' => h, 'state' => 'partial' }], h)
     assert_equal :conflict, I.precheck([{ 'normalized_hash' => 'b' * 64, 'state' => 'imported' }], h)
+    assert_equal :new, I.precheck([{ 'normalized_hash' => h, 'state' => 'rolled_back' }], h)
+    assert_equal :skip, I.precheck([{ 'normalized_hash' => h, 'state' => 'rolled_back' }, { 'normalized_hash' => h, 'state' => 'imported' }], h)
   end
 
   def test_build_segments_appends_source_url_to_first_post_within_budget

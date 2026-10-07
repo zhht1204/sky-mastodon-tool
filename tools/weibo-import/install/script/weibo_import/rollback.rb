@@ -25,7 +25,7 @@ module WeiboImport
       raise ArgumentError, 'rollback 需要 --account' if opts[:account].to_s.strip.empty?
       raise ArgumentError, 'rollback 需要 --batch' if opts[:batch].to_s.strip.empty?
 
-      require_relative 'weibo_import/ledger'
+      require_relative 'ledger'
 
       account = Account.find_local(opts[:account].to_s.strip)
       raise "账号不存在: #{opts[:account]}" if account.nil?
@@ -41,7 +41,10 @@ module WeiboImport
         warn "发现 #{interactions.length} 条新互动，--force 已确认继续"
       end
 
-      return dry_run_report(rows, interactions) unless opts[:execute]
+      unless opts[:execute]
+        puts dry_run_report(rows, interactions)
+        return 0
+      end
 
       confirm_or_abort!(opts)
 
@@ -55,6 +58,10 @@ module WeiboImport
         if status
           status.destroy
           deleted_statuses += 1
+          # Status#destroy 不清理其创建的 Conversation（unlink 只处理 direct）；
+          # parent_status_id 唯一索引会阻塞同 ID 重导。回复段已先行删除、
+          # 外部回复已被互动检查拦截，此处会话仅剩本帖引用，可安全删除。
+          Conversation.where(parent_status_id: status.id).destroy_all
         end
         # 媒体 nullify 后仍归本账号；只有不再被其他帖子引用时才删
         media_ids.each do |mid|
@@ -70,6 +77,9 @@ module WeiboImport
         end
         Ledger.mark_rolled_back!(conn, row['id'])
       end
+
+      # 修正 last_status_at：decrement_count! 不重算该列，回滚后按剩余帖子重置
+      account.stat.update_column(:last_status_at, account.statuses.maximum(:created_at))
 
       puts <<~TEXT
         == rollback 汇总（#{opts[:batch]}）==

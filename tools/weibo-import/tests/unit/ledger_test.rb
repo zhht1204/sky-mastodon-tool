@@ -11,6 +11,7 @@ class LedgerTest < Minitest::Test
     L::STATES.each { |s| assert_includes ddl, "'#{s}'" }
     assert_includes ddl, 'timestamp_id(' # id 默认值复用实例 PG 函数
     assert_includes ddl, 'CREATE TABLE IF NOT EXISTS' # 幂等
+    assert_includes ddl, 'CREATE SEQUENCE sky_import_ledgers_id_seq' # timestamp_id 依赖序列
   end
 
   def test_ddl_records_verification_columns

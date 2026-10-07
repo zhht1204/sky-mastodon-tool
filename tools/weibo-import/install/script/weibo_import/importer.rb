@@ -28,12 +28,12 @@ module WeiboImport
       opts = cli.options
       return placeholder_guard unless defined?(Rails)
 
-      require_relative 'weibo_import/normalize'
-      require_relative 'weibo_import/splitter'
-      require_relative 'weibo_import/id_allocator'
-      require_relative 'weibo_import/ledger'
-      require_relative 'weibo_import/silence'
-      require_relative 'weibo_import/downloader'
+      require_relative 'normalize'
+      require_relative 'splitter'
+      require_relative 'id_allocator'
+      require_relative 'ledger'
+      require_relative 'silence'
+      require_relative 'downloader'
 
       begin
         execute(opts)
@@ -94,6 +94,7 @@ module WeiboImport
       write_map_file(ctx)
       puts Silence.audit_report
       puts summary(ctx, records.length)
+      print_failure_details(ctx)
       0
     end
 
@@ -126,9 +127,10 @@ module WeiboImport
     end
 
     # 幂等预检：:skip（全段已导入）/ :partial_skip（有 partial 段，避免重复不再写）/
-    # :conflict（内容哈希变化）/ :new
+    # :conflict（内容哈希变化）/ :new（无行或全部已回滚——允许重新导入）
     def precheck(existing_rows, line_hash)
       return :new if existing_rows.empty?
+      return :new if existing_rows.all? { |r| r['state'] == 'rolled_back' }
 
       hashes = existing_rows.map { |r| r['normalized_hash'] }.uniq
       return :conflict unless hashes == [line_hash]
@@ -346,6 +348,15 @@ module WeiboImport
       File.open(ctx[:map_out], 'a:UTF-8') do |f|
         ctx[:map_lines].each { |l| f.puts(JSON.generate(l)) }
       end
+    end
+
+    def print_failure_details(ctx)
+      return if ctx[:failures].empty? && ctx[:conflicts].empty?
+
+      puts '失败明细（前 10 条）:' if ctx[:failures].any?
+      ctx[:failures].first(10).each { |f| puts "  #{f['source_id']}: #{f['error']}" }
+      puts '冲突明细（前 10 条）:' if ctx[:conflicts].any?
+      ctx[:conflicts].first(10).each { |c| puts "  #{c['source_id']}: existing=#{c['existing'].join(',')} current=#{c['current']}" }
     end
   end
 end
