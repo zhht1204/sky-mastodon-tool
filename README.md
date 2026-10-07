@@ -10,7 +10,7 @@
 |---|---|---|
 | A | **已交付** | CLI 骨架（`plan`/`env-check` 真实可用，`import`/`verify`/`rollback`/`setup-ledger` 占位）；`weibo_normalize.rb`（`inspect`/`map`/`normalize`/`fetch-media` 纯 Ruby 可独立运行）；splitter / id_allocator / ledger 设计 / backup 编排（dry-run）；minitest 单测与本地端到端演练。**无任何生产实例访问、无真实导入写入、无数据库表创建。** |
 | B | **已交付**（隔离实例验证） | 实装 `import`/`verify`/`rollback`/`setup-ledger`、静默回调抑制（定向 no-op + 审计）、账本表（唯一约束 + advisory lock + UPSERT）、确定性历史 Snowflake ID（`override_timestamps` 显式 ID 已验证不被覆盖）。隔离实例（4.6.2）实测：试导入 20 条 → verify PASS → 幂等重跑 → 回滚 → 全量重建闭环；网页核验 2012 原时间线/转发引用/互动摘要/原文链接/图片正常。剩余：生产实例 env-check 校准 + 试导入验收（G4/G5 确认门）→ 批次 C。 |
-| C | 待启动 | 全量导入与收尾：完整计数口径对账、回滚演练、批次归档。 |
+| C | **已完成**（2026-10-07） | 生产全量导入：610 条微博 → **644 帖 + 224 媒体**（试导入 20 + 全量 624，批 prod-pilot-001 / prod-full-001）；双批次 verify PASS，statuses_count 81→725 精确，last_status_at 未回退，队列零任务，幂等重跑零新建；微博 ID → 帖子映射见 `tmp/import-map-prod-*.jsonl`（本机）与生产主机 `~/weibo-import/`（备份 `~/weibo-import/backups/20261007-174054/`：pg_dump 6.8MB + 配置 + 基线快照，恢复验证零错误）。 |
 
 ## 快速开始（Windows 开发机）
 
