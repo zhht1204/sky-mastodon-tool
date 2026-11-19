@@ -10,3 +10,7 @@ tmp/
 *.jsonl
 !**/tests/fixtures/**/*.jsonl
 **/docs/field-mapping-report.generated.md
+
+# Production credentials for the prod-opt skill; never commit.
+.env.production
+tools/.env.production

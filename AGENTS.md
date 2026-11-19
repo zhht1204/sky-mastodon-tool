@@ -33,3 +33,12 @@
 - 时间保真：绝不修改来源时间；无法解析/异常时间进错误清单，绝不用当前时间顶替。
 - 可见性只能收紧不能放宽；导入默认 `unlisted`。
 - 绝不为了排序人为增减 `created_at`（Snowflake ID 分配同样不得改动 `created_at`）。
+
+## 生产运维（prod-opt）
+
+生产环境的连接信息只放在**仓库根目录的 `.env.production`**（必须 gitignore，不提交、不打印、不写进聊天与提交记录）。任何生产操作（巡检、迁移、数据核对、容器与服务状态检查）按本仓库的 prod-opt Skill 执行：
+
+- `.github/skills/prod-opt/SKILL.md` —— 本项目的生产事实、连接方式、巡检清单与安全红线；
+- 通用规则：`../sky-guiding/.github/skills/prod-opt/SKILL.md`。
+
+默认只读；写操作（迁移 / DML / 重启 / 导入）必须先说明影响范围与可回滚性，并得到用户明确确认；缺少连接信息时让用户补 `.env.production`，不要猜、不要用开发库顶替、不要把凭据写进仓库。
